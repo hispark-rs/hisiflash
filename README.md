@@ -2,7 +2,7 @@
 
 一个跨平台的 HiSilicon 芯片烧录工具，使用 Rust 编写。灵感来自 [espflash](https://github.com/esp-rs/espflash) 和 [esptool](https://github.com/espressif/esptool)。
 
-[![CI](https://github.com/sanchuanhehe/hisiflash/actions/workflows/ci.yml/badge.svg)](https://github.com/sanchuanhehe/hisiflash/actions/workflows/ci.yml)
+[![CI](https://github.com/hispark-rs/hisiflash/actions/workflows/ci.yml/badge.svg)](https://github.com/hispark-rs/hisiflash/actions/workflows/ci.yml)
 [![Rust](https://img.shields.io/badge/rust-1.85%2B-orange.svg)](https://www.rust-lang.org/)
 [![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](LICENSE)
 
@@ -65,17 +65,17 @@ cargo binstall hisiflash-cli
 
 ```bash
 # 安装最新 master 分支
-cargo install --git https://github.com/sanchuanhehe/hisiflash -p hisiflash-cli
+cargo install --git https://github.com/hispark-rs/hisiflash -p hisiflash-cli
 
 # 安装指定版本 tag
-cargo install --git https://github.com/sanchuanhehe/hisiflash --tag cli-v1.0.0 -p hisiflash-cli
+cargo install --git https://github.com/hispark-rs/hisiflash --tag cli-v1.0.0 -p hisiflash-cli
 ```
 
 ### 从源码编译
 
 ```bash
 # 克隆仓库
-git clone https://github.com/sanchuanhehe/hisiflash.git
+git clone https://github.com/hispark-rs/hisiflash.git
 cd hisiflash
 
 # 编译 release 版本
@@ -87,7 +87,7 @@ cargo install --path hisiflash-cli
 
 ### 二进制下载
 
-从 [Releases](https://github.com/sanchuanhehe/hisiflash/releases) 页面下载预编译的二进制文件。
+从 [Releases](https://github.com/hispark-rs/hisiflash/releases) 页面下载预编译的二进制文件。
 
 ### 安装 Shell 补全（可选）
 

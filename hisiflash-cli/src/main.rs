@@ -104,7 +104,7 @@ rust_i18n::i18n!("locales", fallback = "en");
 #[command(name = "hisiflash")]
 #[command(author, version, about, long_about = None)]
 #[command(propagate_version = true)]
-#[command(after_help = "For more information, visit: https://github.com/sanchuanhehe/hisiflash")]
+#[command(after_help = "For more information, visit: https://github.com/hispark-rs/hisiflash")]
 #[allow(clippy::struct_excessive_bools)]
 pub(crate) struct Cli {
     /// Serial port to use (auto-detected if not specified).

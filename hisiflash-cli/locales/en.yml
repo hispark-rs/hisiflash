@@ -79,7 +79,7 @@ help.options_heading: "OPTIONS"
 
 # Application-level help text
 app.about: "A cross-platform tool for flashing HiSilicon chips (WS63, BS2X series)"
-app.after_help: "Environment variables:\n  HISIFLASH_PORT              Default serial port\n  HISIFLASH_BAUD              Default baud rate (default: 921600)\n  HISIFLASH_CHIP              Default chip type (ws63, bs2x, bs25)\n  HISIFLASH_LANG              Language/locale (en, zh-CN)\n  HISIFLASH_NON_INTERACTIVE   Non-interactive mode (disable prompts)\n\nFor more information, visit: https://github.com/sanchuanhehe/hisiflash"
+app.after_help: "Environment variables:\n  HISIFLASH_PORT              Default serial port\n  HISIFLASH_BAUD              Default baud rate (default: 921600)\n  HISIFLASH_CHIP              Default chip type (ws63, bs2x, bs25)\n  HISIFLASH_LANG              Language/locale (en, zh-CN)\n  HISIFLASH_NON_INTERACTIVE   Non-interactive mode (disable prompts)\n\nFor more information, visit: https://github.com/hispark-rs/hisiflash"
 
 # Command descriptions
 cmd.flash.about: "Flash a FWPKG firmware package"

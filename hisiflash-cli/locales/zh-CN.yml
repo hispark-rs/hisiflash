@@ -79,7 +79,7 @@ help.options_heading: "选项"
 
 # 应用级帮助文本
 app.about: "跨平台海思芯片烧录工具 (WS63、BS2X 系列)"
-app.after_help: "环境变量:\n  HISIFLASH_PORT              默认串口\n  HISIFLASH_BAUD              默认波特率 (默认: 921600)\n  HISIFLASH_CHIP              默认芯片类型 (ws63, bs2x, bs25)\n  HISIFLASH_LANG              语言/区域设置 (en, zh-CN)\n  HISIFLASH_NON_INTERACTIVE   非交互模式 (禁用提示)\n\n更多信息请访问: https://github.com/sanchuanhehe/hisiflash"
+app.after_help: "环境变量:\n  HISIFLASH_PORT              默认串口\n  HISIFLASH_BAUD              默认波特率 (默认: 921600)\n  HISIFLASH_CHIP              默认芯片类型 (ws63, bs2x, bs25)\n  HISIFLASH_LANG              语言/区域设置 (en, zh-CN)\n  HISIFLASH_NON_INTERACTIVE   非交互模式 (禁用提示)\n\n更多信息请访问: https://github.com/hispark-rs/hisiflash"
 
 # 命令描述
 cmd.flash.about: "烧录 FWPKG 固件包"
