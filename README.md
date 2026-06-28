@@ -65,10 +65,10 @@ cargo binstall hisiflash-cli
 
 ```bash
 # 安装最新 master 分支
-cargo install --git https://github.com/hispark-rs/hisiflash -p hisiflash-cli
+cargo install --git https://github.com/hispark-rs/hisiflash
 
 # 安装指定版本 tag
-cargo install --git https://github.com/hispark-rs/hisiflash --tag cli-v1.0.0 -p hisiflash-cli
+cargo install --git https://github.com/hispark-rs/hisiflash --tag xxx #请自行替换
 ```
 
 ### 从源码编译
