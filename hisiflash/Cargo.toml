@@ -17,6 +17,7 @@ workspace = true
 thiserror.workspace = true
 log.workspace = true
 byteorder.workspace = true
+hisi-fwpkg.workspace = true
 serde = { workspace = true, optional = true }
 
 # Native serial port (default on non-WASM targets)

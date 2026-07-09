@@ -58,6 +58,15 @@ pub enum Error {
     Config(String),
 }
 
+impl From<hisi_fwpkg::Error> for Error {
+    fn from(value: hisi_fwpkg::Error) -> Self {
+        match value {
+            hisi_fwpkg::Error::Io(err) => Self::Io(err),
+            other => Self::InvalidFwpkg(other.to_string()),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

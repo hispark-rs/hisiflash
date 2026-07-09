@@ -300,6 +300,22 @@ pub(crate) fn partition_type_str(pt: PartitionType) -> &'static str {
         PartitionType::Rom => "ROM",
         PartitionType::Emmc => "eMMC",
         PartitionType::Database => "Database",
+        PartitionType::Flashboot3892 => "FlashBoot-3892",
+        PartitionType::App => "App",
+        PartitionType::AppSign => "App-Sign",
+        PartitionType::Bt => "BT",
+        PartitionType::BtSign => "BT-Sign",
+        PartitionType::Dsp => "DSP",
+        PartitionType::DspSign => "DSP-Sign",
+        PartitionType::SsbSha => "SSB-SHA",
+        PartitionType::SsbSign => "SSB-Sign",
+        PartitionType::Dsp1 => "DSP1",
+        PartitionType::Dsp1Sign => "DSP1-Sign",
+        PartitionType::Small => "Small",
+        PartitionType::SmallSha => "Small-SHA",
+        PartitionType::FlashBin => "Flash-Bin",
+        PartitionType::EmmcBin => "eMMC-Bin",
+        PartitionType::Sha => "SHA",
         PartitionType::Unknown(_) => "Unknown",
     }
 }
@@ -344,6 +360,24 @@ pub(crate) fn format_partition_type(pt: PartitionType) -> String {
         PartitionType::Database => style("Database")
             .dim()
             .to_string(),
+        PartitionType::Flashboot3892 => style("FlashBoot-3892")
+            .yellow()
+            .to_string(),
+        PartitionType::App => "App".to_string(),
+        PartitionType::AppSign => "App-Sign".to_string(),
+        PartitionType::Bt => "BT".to_string(),
+        PartitionType::BtSign => "BT-Sign".to_string(),
+        PartitionType::Dsp => "DSP".to_string(),
+        PartitionType::DspSign => "DSP-Sign".to_string(),
+        PartitionType::SsbSha => "SSB-SHA".to_string(),
+        PartitionType::SsbSign => "SSB-Sign".to_string(),
+        PartitionType::Dsp1 => "DSP1".to_string(),
+        PartitionType::Dsp1Sign => "DSP1-Sign".to_string(),
+        PartitionType::Small => "Small".to_string(),
+        PartitionType::SmallSha => "Small-SHA".to_string(),
+        PartitionType::FlashBin => "Flash-Bin".to_string(),
+        PartitionType::EmmcBin => "eMMC-Bin".to_string(),
+        PartitionType::Sha => "SHA".to_string(),
         PartitionType::Unknown(v) => format!("Unknown({v})"),
     }
 }

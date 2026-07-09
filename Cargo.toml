@@ -92,6 +92,7 @@ byteorder = "1.5"
 
 # Internal crates
 hisiflash = { version = "0.4.0", path = "hisiflash" }
+hisi-fwpkg = { version = "0.2.1", path = "../hisi-fwpkg/crates/hisi-fwpkg" }
 
 # Testing
 tempfile = "3"
