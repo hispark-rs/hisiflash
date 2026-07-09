@@ -77,7 +77,7 @@ anyhow = "1"
 
 # Progress & UI
 indicatif = "0.17"
-console = "0.15"
+console = "0.16"
 log = "0.4"
 env_logger = "0.11"
 
