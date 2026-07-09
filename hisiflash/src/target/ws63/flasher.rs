@@ -503,27 +503,41 @@ impl<P: Port> Ws63Flasher<P> {
         self.cancel
             .check()?;
 
-        // Get LoaderBoot
-        let loaderboot = fwpkg
-            .loaderboot()
-            .ok_or_else(|| Error::InvalidFwpkg("No LoaderBoot partition found".into()))?;
+        if let Some(loaderboot) = fwpkg.loaderboot() {
+            info!("Flashing LoaderBoot: {}", loaderboot.name);
 
-        info!("Flashing LoaderBoot: {}", loaderboot.name);
+            // LoaderBoot: NO download command. After handshake ACK, the device
+            // enters YMODEM mode directly. This matches fbb_burntool and ws63flash.
+            let lb_data = fwpkg.bin_data(loaderboot)?;
+            self.transfer_loaderboot(&loaderboot.name, lb_data, &mut progress)?;
 
-        // LoaderBoot: NO download command. After handshake ACK, the device
-        // enters YMODEM mode directly. This matches fbb_burntool and ws63flash.
-        let lb_data = fwpkg.bin_data(loaderboot)?;
-        self.transfer_loaderboot(&loaderboot.name, lb_data, &mut progress)?;
+            // Wait for LoaderBoot to initialize (device sends SEBOOT magic when ready)
+            self.wait_for_magic(POST_TRANSFER_MAGIC_TIMEOUT)?;
 
-        // Wait for LoaderBoot to initialize (device sends SEBOOT magic when ready)
-        self.wait_for_magic(POST_TRANSFER_MAGIC_TIMEOUT)?;
+            // Change baud rate if in late mode
+            if self.late_baud && self.target_baud != DEFAULT_BAUD {
+                self.change_baud_rate(self.target_baud)?;
+            }
+        } else {
+            info!(
+                "FWPKG has no LoaderBoot partition; flashing app-only package through existing \
+                 SEBOOT session"
+            );
 
-        // Change baud rate if in late mode
-        if self.late_baud && self.target_baud != DEFAULT_BAUD {
-            self.change_baud_rate(self.target_baud)?;
+            // App-only packages are intended for development flows where a
+            // LoaderBoot/SEBOOT session is already active (for example after a
+            // ROM handshake or an external loader step). Probe that state
+            // explicitly so a ROM-only connection fails early with a protocol
+            // timeout instead of silently treating app bytes as LoaderBoot.
+            self.wait_for_magic(MAGIC_TIMEOUT)?;
+
+            if self.late_baud && self.target_baud != DEFAULT_BAUD {
+                self.change_baud_rate(self.target_baud)?;
+            }
         }
 
         // Flash remaining partitions
+        let mut flashed_any = false;
         for bin in fwpkg.normal_bins() {
             self.cancel
                 .check()?;
@@ -549,10 +563,17 @@ impl<P: Port> Ws63Flasher<P> {
 
             let bin_data = fwpkg.bin_data(bin)?;
             self.download_binary(&bin.name, bin_data, bin.burn_addr, &mut progress)?;
+            flashed_any = true;
 
             // Inter-partition delay to prevent serial data stale
             // (MCU won't respond if next command follows immediately)
             sleep_interruptible(&self.cancel, PARTITION_DELAY)?;
+        }
+
+        if !flashed_any {
+            return Err(Error::InvalidFwpkg(
+                "No non-LoaderBoot partitions selected for flashing".into(),
+            ));
         }
 
         info!("Flashing complete!");

@@ -44,6 +44,7 @@ pub(crate) fn cmd_flash(
     filter: Option<&String>,
     late_baud: bool,
     skip_verify: bool,
+    loaderboot: Option<&PathBuf>,
     chip: ChipFamily,
     keep_open: bool,
 ) -> Result<FlashOutcome> {
@@ -148,6 +149,37 @@ pub(crate) fn cmd_flash(
         pb
     };
 
+    let external_loaderboot = if fwpkg
+        .loaderboot()
+        .is_none()
+    {
+        let loaderboot = loaderboot.ok_or_else(|| {
+            CliError::Usage(
+                "app-only FWPKG has no LoaderBoot partition; pass --loaderboot <loaderboot.bin>"
+                    .into(),
+            )
+        })?;
+
+        if !cli.quiet {
+            eprintln!(
+                "{} {}",
+                style("📦").cyan(),
+                t!("write.loading_loaderboot", path = loaderboot.display())
+            );
+        }
+
+        Some(std::fs::read(loaderboot).with_context(|| {
+            t!(
+                "error.read_loaderboot",
+                path = loaderboot
+                    .display()
+                    .to_string()
+            )
+        })?)
+    } else {
+        None
+    };
+
     // Flash
     let filter_names: Option<Vec<&str>> = filter
         .as_ref()
@@ -159,19 +191,55 @@ pub(crate) fn cmd_flash(
 
     let mut current_partition = String::new();
 
-    let flash_result = flasher.flash_fwpkg(
-        &fwpkg,
-        filter_slice,
-        &mut |name: &str, current: usize, total: usize| {
-            if name != current_partition {
-                current_partition = name.to_string();
-                pb.set_message(t!("flash.flashing", name = name).to_string());
+    let flash_result = if let Some(loaderboot) = external_loaderboot.as_deref() {
+        let mut bin_data = Vec::new();
+        for bin in fwpkg.normal_bins() {
+            if let Some(names) = filter_slice {
+                if !names
+                    .iter()
+                    .any(|n| {
+                        bin.name
+                            .contains(n)
+                    })
+                {
+                    continue;
+                }
             }
-            if let Some(pct) = (current * 100).checked_div(total) {
-                pb.set_position(pct as u64);
-            }
-        },
-    );
+
+            bin_data.push((
+                fwpkg
+                    .bin_data(bin)?
+                    .to_vec(),
+                bin.burn_addr,
+            ));
+        }
+
+        if bin_data.is_empty() {
+            Err(hisiflash::Error::InvalidFwpkg(
+                "No non-LoaderBoot partitions selected for flashing".into(),
+            ))
+        } else {
+            let bins: Vec<(&[u8], u32)> = bin_data
+                .iter()
+                .map(|(data, addr)| (data.as_slice(), *addr))
+                .collect();
+            flasher.write_bins(loaderboot, &bins)
+        }
+    } else {
+        flasher.flash_fwpkg(
+            &fwpkg,
+            filter_slice,
+            &mut |name: &str, current: usize, total: usize| {
+                if name != current_partition {
+                    current_partition = name.to_string();
+                    pb.set_message(t!("flash.flashing", name = name).to_string());
+                }
+                if let Some(pct) = (current * 100).checked_div(total) {
+                    pb.set_position(pct as u64);
+                }
+            },
+        )
+    };
 
     if let Err(err) = flash_result {
         flasher.close();

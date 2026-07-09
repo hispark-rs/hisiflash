@@ -368,6 +368,10 @@ enum Commands {
         #[arg(long)]
         skip_verify: bool,
 
+        /// LoaderBoot binary to use when flashing an app-only FWPKG.
+        #[arg(long)]
+        loaderboot: Option<PathBuf>,
+
         /// Open serial monitor after flashing.
         #[arg(long)]
         monitor: bool,
@@ -674,6 +678,7 @@ fn run_with_args(raw_args: &[String]) -> Result<()> {
             filter,
             late_baud,
             skip_verify,
+            loaderboot,
             monitor,
             monitor_baud,
             monitor_port,
@@ -697,6 +702,7 @@ fn run_with_args(raw_args: &[String]) -> Result<()> {
                 filter.as_ref(),
                 *late_baud,
                 *skip_verify,
+                loaderboot.as_ref(),
                 chip.into(),
                 want_handoff,
             )?;
@@ -1161,6 +1167,7 @@ mod cli_tests {
             filter,
             late_baud,
             skip_verify,
+            loaderboot,
             monitor,
             monitor_baud,
             monitor_port,
@@ -1178,6 +1185,7 @@ mod cli_tests {
             assert_eq!(filter.as_deref(), Some("app,flashboot"));
             assert!(late_baud);
             assert!(skip_verify);
+            assert!(loaderboot.is_none());
             assert!(monitor);
             assert_eq!(monitor_baud, 115200);
             assert_eq!(monitor_port, None);
