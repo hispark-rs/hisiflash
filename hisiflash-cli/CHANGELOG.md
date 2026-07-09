@@ -8,6 +8,16 @@ with pre-release tags.
 
 ## [Unreleased]
 
+## [1.0.0-beta.1] - 2026-07-09
+
+### Changed
+- Firmware package metadata reporting now reuses the `hisi-fwpkg` parser/partition semantics instead of maintaining a separate fwpkg interpretation in the CLI stack.
+- `info --json` now aligns its partition metadata with `hisi-fwpkg plan --format json` for the same fwpkg input.
+
+### Compatibility
+- Beta release: GitHub release artifacts are produced for validation, but crates.io publishing remains reserved for the stable `1.0.0` release.
+- Requires `hisi-fwpkg` library crate `0.3.0` for the shared parser semantics.
+
 ## [1.0.0-alpha.12] - 2026-04-28
 
 ### Added
