@@ -77,6 +77,15 @@ const MAX_CONNECT_ATTEMPTS: usize = 7;
 /// Maximum number of download retry attempts.
 const MAX_DOWNLOAD_RETRIES: usize = 3;
 
+const BAUD_FALLBACKS: &[u32] = &[921_600, 460_800, 230_400, 115_200];
+
+fn lower_fallback_baud(current: u32) -> Option<u32> {
+    BAUD_FALLBACKS
+        .iter()
+        .copied()
+        .find(|baud| *baud < current)
+}
+
 fn is_interrupted_error(e: &Error) -> bool {
     match e {
         Error::Io(io) => {
@@ -124,6 +133,7 @@ fn sleep_interruptible(cancel: &CancelContext, total: Duration) -> Result<()> {
 pub struct Ws63Flasher<P: Port> {
     port: P,
     target_baud: u32,
+    active_baud: u32,
     late_baud: bool,
     finish_without_c: bool,
     prefetched_magic_bytes: Vec<u8>,
@@ -148,6 +158,7 @@ impl<P: Port> Ws63Flasher<P> {
         Self {
             port,
             target_baud,
+            active_baud: DEFAULT_BAUD,
             late_baud: false,
             finish_without_c: true,
             prefetched_magic_bytes: Vec::new(),
@@ -180,6 +191,7 @@ impl<P: Port> Ws63Flasher<P> {
         Self {
             port,
             target_baud,
+            active_baud: DEFAULT_BAUD,
             late_baud: false,
             finish_without_c: true,
             prefetched_magic_bytes: Vec::new(),
@@ -313,6 +325,8 @@ impl<P: Port> Ws63Flasher<P> {
                         // Change baud rate if not in late mode
                         if !self.late_baud && self.target_baud != DEFAULT_BAUD {
                             self.change_baud_rate(self.target_baud)?;
+                        } else {
+                            self.active_baud = DEFAULT_BAUD;
                         }
 
                         return Ok(());
@@ -358,8 +372,26 @@ impl<P: Port> Ws63Flasher<P> {
         self.port
             .clear_buffers()?;
 
+        self.active_baud = baud;
         debug!("Baud rate changed to {baud}");
         Ok(())
+    }
+
+    fn lower_baud_for_retry(&mut self, failed_name: &str, err: &Error) -> Result<bool> {
+        let current_baud = self
+            .port
+            .baud_rate();
+        self.active_baud = current_baud;
+        let Some(next_baud) = lower_fallback_baud(current_baud) else {
+            return Ok(false);
+        };
+
+        warn!(
+            "Download for {failed_name} failed at {current_baud} baud: {err}; retrying at \
+             {next_baud} baud"
+        );
+        self.change_baud_rate(next_baud)?;
+        Ok(true)
     }
 
     /// Send a command frame.
@@ -611,11 +643,14 @@ impl<P: Port> Ws63Flasher<P> {
                     }
 
                     if attempt < MAX_DOWNLOAD_RETRIES {
-                        warn!(
-                            "Download failed for {name} (attempt \
-                             {attempt}/{MAX_DOWNLOAD_RETRIES}): {e}"
-                        );
-                        warn!("Retrying...");
+                        let lowered = self.lower_baud_for_retry(name, &e)?;
+                        if !lowered {
+                            warn!(
+                                "Download failed for {name} (attempt \
+                                 {attempt}/{MAX_DOWNLOAD_RETRIES}): {e}"
+                            );
+                            warn!("Retrying...");
+                        }
                         last_error = Some(e);
 
                         // Clear buffers and wait before retry
@@ -824,11 +859,13 @@ mod native_impl {
                         if attempt > 1 {
                             debug!("Port opened on attempt {attempt}");
                         }
-                        return Ok(Self::with_cancel(
+                        let mut flasher = Self::with_cancel(
                             port,
                             config.baud_rate,
                             crate::cancel_context_from_global(),
-                        ));
+                        );
+                        flasher.active_baud = config.baud_rate;
+                        return Ok(flasher);
                     },
                     Err(e) => {
                         warn!(
@@ -1318,6 +1355,38 @@ mod tests {
         assert!(result.is_err());
         // Verify error is the Unsupported variant
         assert!(matches!(result, Err(crate::error::Error::Unsupported(_))));
+    }
+
+    #[test]
+    fn test_lower_fallback_baud_sequence() {
+        assert_eq!(lower_fallback_baud(2_000_000), Some(921_600));
+        assert_eq!(lower_fallback_baud(921_600), Some(460_800));
+        assert_eq!(lower_fallback_baud(460_800), Some(230_400));
+        assert_eq!(lower_fallback_baud(230_400), Some(115_200));
+        assert_eq!(lower_fallback_baud(115_200), None);
+    }
+
+    #[test]
+    fn test_download_retry_lowers_baud() {
+        let mut port = MockPort::new("/dev/ttyUSB0");
+        port.set_baud_rate(921_600)
+            .unwrap();
+
+        let mut flasher = Ws63Flasher::with_cancel(port, 921_600, CancelContext::none());
+        flasher.active_baud = 921_600;
+
+        let lowered = flasher
+            .lower_baud_for_retry("app.bin", &Error::Ymodem("nak".into()))
+            .unwrap();
+
+        assert!(lowered);
+        assert_eq!(flasher.active_baud, 460_800);
+        assert_eq!(
+            flasher
+                .port
+                .baud_rate(),
+            460_800
+        );
     }
 
     #[test]
