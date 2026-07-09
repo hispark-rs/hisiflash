@@ -7,6 +7,11 @@ and this crate follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 
 ## [Unreleased]
 
+### Fixed
+- Automatically lower the active transfer baud rate and retry non-interrupted
+  partition downloads when a YMODEM/SEBOOT transfer fails, improving reliability
+  on unstable USB-serial links.
+
 ## [0.4.0] - 2026-04-28
 
 ### Added
