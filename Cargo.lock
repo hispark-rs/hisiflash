@@ -563,6 +563,8 @@ checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 [[package]]
 name = "hisi-fwpkg"
 version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c28748cae6398777b70d95427a250f5e515ad083ea9e0a7b67d3057494a2b8f7"
 dependencies = [
  "object",
  "sha2",
