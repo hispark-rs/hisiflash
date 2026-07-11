@@ -281,7 +281,7 @@ impl<P: Port> Ws63Flasher<P> {
             .clear_buffers()?;
 
         let start = Instant::now();
-        let handshake_frame = CommandFrame::handshake(self.target_baud);
+        let handshake_frame = CommandFrame::handshake(self.handshake_baud());
         let handshake_data = handshake_frame.build();
 
         // Send handshake frames repeatedly until we get a response
@@ -347,6 +347,14 @@ impl<P: Port> Ws63Flasher<P> {
             "No response after {} seconds",
             HANDSHAKE_TIMEOUT.as_secs()
         )))
+    }
+
+    fn handshake_baud(&self) -> u32 {
+        if self.late_baud {
+            DEFAULT_BAUD
+        } else {
+            self.target_baud
+        }
     }
 
     /// Change the baud rate.
@@ -1171,6 +1179,15 @@ mod tests {
 
         assert!(flasher.late_baud);
         assert_eq!(flasher.verbose, 2);
+        assert_eq!(flasher.handshake_baud(), DEFAULT_BAUD);
+    }
+
+    #[test]
+    fn test_normal_baud_is_declared_in_handshake() {
+        let port = MockPort::new("/dev/ttyUSB0");
+        let flasher = Ws63Flasher::with_cancel(port, 230400, CancelContext::none());
+
+        assert_eq!(flasher.handshake_baud(), 230400);
     }
 
     /// Test MockPort read/write operations.

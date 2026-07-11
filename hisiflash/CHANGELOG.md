@@ -11,6 +11,10 @@ and this crate follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 - Automatically lower the active transfer baud rate and retry non-interrupted
   partition downloads when a YMODEM/SEBOOT transfer fails, improving reliability
   on unstable USB-serial links.
+- In `--late-baud` mode, declare the default 115200 baud in the Boot ROM
+  handshake and defer the target baud until LoaderBoot is running. Previously
+  the device switched early while the host stayed at 115200, losing YMODEM's
+  initial `C` request.
 
 ## [0.4.0] - 2026-04-28
 
