@@ -1094,30 +1094,38 @@ mod cli_tests {
         }
     }
 
-    /// Global lock for `rust_i18n::set_locale` which mutates global state.
-    /// Only held during set_locale + command construction; assertions run
-    /// lock-free so tests can maximally overlap.
+    /// Global lock for tests that call code which mutates rust-i18n's locale.
+    ///
+    /// `run_with_args` also calls `rust_i18n::set_locale`, so it must share this
+    /// lock with the localized help builders. Otherwise a parallel test can
+    /// switch locales while a clap command is being localized, producing a
+    /// command with mixed-language headings and descriptions.
     static LOCALE_LOCK: Mutex<()> = Mutex::new(());
+
+    fn with_locale_lock<T>(action: impl FnOnce() -> T) -> T {
+        let _lock = LOCALE_LOCK
+            .lock()
+            .unwrap();
+        action()
+    }
 
     /// Build a localized command for the given locale.
     /// Holds the lock only during `set_locale` + `build_localized_command`;
     /// the returned `Command` has all i18n strings baked in and is safe
     /// to inspect without the lock.
     fn localized_cmd(locale: &str) -> clap::Command {
-        let _lock = LOCALE_LOCK
-            .lock()
-            .unwrap();
-        rust_i18n::set_locale(locale);
-        build_localized_command()
+        with_locale_lock(|| {
+            rust_i18n::set_locale(locale);
+            build_localized_command()
+        })
     }
 
     /// Call `localize_arg` under the locale lock.
     fn localized_arg(locale: &str, arg: clap::Arg) -> clap::Arg {
-        let _lock = LOCALE_LOCK
-            .lock()
-            .unwrap();
-        rust_i18n::set_locale(locale);
-        localize_arg(arg)
+        with_locale_lock(|| {
+            rust_i18n::set_locale(locale);
+            localize_arg(arg)
+        })
     }
 
     // ---- clap validation ----
@@ -1530,7 +1538,7 @@ mod cli_tests {
     #[test]
     fn test_run_no_args_returns_ok() {
         let args = vec!["hisiflash".to_string()];
-        let result = run_with_args(&args);
+        let result = with_locale_lock(|| run_with_args(&args));
         // Help output is printed but function should return Ok
         assert!(result.is_ok(), "Expected Ok but got: {result:?}");
     }
@@ -1538,14 +1546,14 @@ mod cli_tests {
     #[test]
     fn test_run_version_returns_ok() {
         let args = vec!["hisiflash".to_string(), "--version".to_string()];
-        let result = run_with_args(&args);
+        let result = with_locale_lock(|| run_with_args(&args));
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_run_short_version_returns_ok() {
         let args = vec!["hisiflash".to_string(), "-V".to_string()];
-        let result = run_with_args(&args);
+        let result = with_locale_lock(|| run_with_args(&args));
         assert!(result.is_ok());
     }
 
