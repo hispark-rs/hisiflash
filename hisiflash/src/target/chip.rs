@@ -80,6 +80,10 @@ impl ChipFamily {
         true // All HiSilicon chips support eFuse
     }
 
+    fn uses_at_reset_before_connect(self) -> bool {
+        matches!(self, Self::Ws63)
+    }
+
     /// Check if this chip family requires signed firmware.
     pub fn requires_signed_firmware(&self) -> bool {
         // Some chips require signed firmware for security
@@ -271,6 +275,7 @@ impl ChipFamily {
                 // the shared protocol layer.
                 let flasher = super::ws63::flasher::Ws63Flasher::open(port_name, target_baud)?
                     .with_late_baud(late_baud)
+                    .with_at_reset(self.uses_at_reset_before_connect())
                     .with_finish_without_c(!matches!(self, Self::Bs2x | Self::Bs25))
                     .with_verbose(verbose);
                 Ok(Box::new(flasher))
@@ -323,6 +328,7 @@ impl ChipFamily {
                 let flasher =
                     super::ws63::flasher::Ws63Flasher::with_cancel(port, target_baud, cancel)
                         .with_late_baud(late_baud)
+                        .with_at_reset(self.uses_at_reset_before_connect())
                         .with_finish_without_c(!matches!(self, Self::Bs2x | Self::Bs25))
                         .with_verbose(verbose);
                 Ok(Box::new(flasher))
@@ -358,6 +364,7 @@ impl ChipFamily {
             Self::Ws63 | Self::Bs2x | Self::Bs25 => {
                 let flasher = super::ws63::flasher::Ws63Flasher::open_with_config(config)?
                     .with_late_baud(late_baud)
+                    .with_at_reset(self.uses_at_reset_before_connect())
                     .with_finish_without_c(!matches!(self, Self::Bs2x | Self::Bs25))
                     .with_verbose(verbose);
                 Ok(Box::new(flasher))
@@ -468,6 +475,13 @@ mod tests {
     fn test_chip_family_default() {
         let family = ChipFamily::default();
         assert_eq!(family, ChipFamily::Ws63);
+    }
+
+    #[test]
+    fn test_at_reset_is_ws63_only() {
+        assert!(ChipFamily::Ws63.uses_at_reset_before_connect());
+        assert!(!ChipFamily::Bs2x.uses_at_reset_before_connect());
+        assert!(!ChipFamily::Bs25.uses_at_reset_before_connect());
     }
 
     #[test]

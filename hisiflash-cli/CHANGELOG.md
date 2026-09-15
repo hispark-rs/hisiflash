@@ -8,6 +8,11 @@ with pre-release tags.
 
 ## [Unreleased]
 
+### Changed
+- WS63 flash, write, and erase connections now make a one-shot best-effort
+  `AT+RST` attempt before the existing SEBOOT handshake; devices without AT
+  support still use the manual-reset fallback.
+
 ## [1.0.0-beta.1] - 2026-07-09
 
 ### Changed

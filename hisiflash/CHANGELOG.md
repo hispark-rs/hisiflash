@@ -7,7 +7,15 @@ and this crate follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 
 ## [Unreleased]
 
+### Added
+- Before its first SEBOOT handshake, the WS63 flasher now makes one best-effort
+  `AT+RST` attempt at 115200 baud. Unsupported firmware and ordinary serial
+  errors fall back to the existing handshake/manual-reset flow.
+
 ### Fixed
+- Preserve partial handshake acknowledgements across serial reads and retain
+  trailing LoaderBoot input, including acknowledgements interleaved with AT
+  echo or boot output.
 - Automatically lower the active transfer baud rate and retry non-interrupted
   partition downloads when a YMODEM/SEBOOT transfer fails, improving reliability
   on unstable USB-serial links.

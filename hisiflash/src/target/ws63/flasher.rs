@@ -39,7 +39,7 @@ use {
         image::fwpkg::Fwpkg,
         port::Port,
         protocol::ymodem::{YmodemConfig, YmodemTransfer},
-        target::ws63::protocol::{CommandFrame, DEFAULT_BAUD, contains_handshake_ack},
+        target::ws63::protocol::{CommandFrame, DEFAULT_BAUD, HANDSHAKE_ACK},
     },
     log::{debug, info, trace, warn},
     std::{
@@ -70,6 +70,12 @@ const POST_TRANSFER_MAGIC_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// Delay between connection retry attempts.
 const CONNECT_RETRY_DELAY: Duration = Duration::from_millis(500);
+
+/// AT command used to request a software reset from a running WS63 firmware.
+const AT_RESET_COMMAND: &[u8] = b"AT+RST\r\n";
+
+/// Give the chip a short head start before beginning the Boot ROM handshake.
+const AT_RESET_DELAY: Duration = Duration::from_millis(50);
 
 /// Maximum number of connection attempts.
 const MAX_CONNECT_ATTEMPTS: usize = 7;
@@ -138,6 +144,7 @@ pub struct Ws63Flasher<P: Port> {
     finish_without_c: bool,
     prefetched_magic_bytes: Vec<u8>,
     prefetched_ymodem_bytes: Vec<u8>,
+    at_reset_before_connect: bool,
     verbose: u8,
     cancel: CancelContext,
 }
@@ -163,6 +170,7 @@ impl<P: Port> Ws63Flasher<P> {
             finish_without_c: true,
             prefetched_magic_bytes: Vec::new(),
             prefetched_ymodem_bytes: Vec::new(),
+            at_reset_before_connect: true,
             verbose: 0,
             cancel: CancelContext::none(),
         }
@@ -196,6 +204,7 @@ impl<P: Port> Ws63Flasher<P> {
             finish_without_c: true,
             prefetched_magic_bytes: Vec::new(),
             prefetched_ymodem_bytes: Vec::new(),
+            at_reset_before_connect: true,
             verbose: 0,
             cancel,
         }
@@ -219,6 +228,18 @@ impl<P: Port> Ws63Flasher<P> {
         self
     }
 
+    /// Enable or disable the best-effort AT reset before the first handshake.
+    ///
+    /// When enabled, the flasher sends `AT+RST` at 115200 baud once before
+    /// starting the normal SEBOOT handshake. A regular serial error is logged
+    /// and ignored so devices without AT support can still be reset manually.
+    /// Cancellation and interrupted I/O are still propagated immediately.
+    #[must_use]
+    pub fn with_at_reset(mut self, enabled: bool) -> Self {
+        self.at_reset_before_connect = enabled;
+        self
+    }
+
     /// Set verbose output level.
     #[must_use]
     pub fn with_verbose(mut self, verbose: u8) -> Self {
@@ -236,7 +257,10 @@ impl<P: Port> Ws63Flasher<P> {
             self.port
                 .name()
         );
-        info!("Please reset the device to enter download mode.");
+        if self.at_reset_before_connect {
+            info!("Trying AT+RST before the Boot ROM handshake.");
+        }
+        info!("If needed, reset the device manually to enter download mode.");
 
         for attempt in 1..=MAX_CONNECT_ATTEMPTS {
             self.cancel
@@ -246,7 +270,7 @@ impl<P: Port> Ws63Flasher<P> {
                 info!("Connection attempt {attempt}/{MAX_CONNECT_ATTEMPTS}");
             }
 
-            match self.try_connect() {
+            match self.try_connect(attempt == 1 && self.at_reset_before_connect) {
                 Ok(()) => {
                     return Ok(());
                 },
@@ -273,16 +297,21 @@ impl<P: Port> Ws63Flasher<P> {
     }
 
     /// Single connection attempt.
-    fn try_connect(&mut self) -> Result<()> {
+    fn try_connect(&mut self, try_at_reset: bool) -> Result<()> {
         self.cancel
             .check()?;
 
         self.port
             .clear_buffers()?;
 
+        if try_at_reset {
+            self.try_at_reset_before_connect()?;
+        }
+
         let start = Instant::now();
         let handshake_frame = CommandFrame::handshake(self.handshake_baud());
         let handshake_data = handshake_frame.build();
+        let mut handshake_response = Vec::with_capacity(HANDSHAKE_ACK.len());
 
         // Send handshake frames repeatedly until we get a response
         while start.elapsed() < HANDSHAKE_TIMEOUT {
@@ -319,17 +348,44 @@ impl<P: Port> Ws63Flasher<P> {
             {
                 Ok(n) if n > 0 => {
                     trace!("Received {n} bytes");
-                    if contains_handshake_ack(&buf[..n]) {
-                        info!("Handshake successful!");
+                    handshake_response.extend_from_slice(&buf[..n]);
+                    let ack_start = handshake_response
+                        .windows(HANDSHAKE_ACK.len())
+                        .position(|window| window == HANDSHAKE_ACK);
 
-                        // Change baud rate if not in late mode
-                        if !self.late_baud && self.target_baud != DEFAULT_BAUD {
-                            self.change_baud_rate(self.target_baud)?;
-                        } else {
-                            self.active_baud = DEFAULT_BAUD;
+                    if let Some(ack_start) = ack_start {
+                        // HANDSHAKE_ACK is the first 10 bytes of the 12-byte
+                        // response frame. Wait for its CRC as well, then retain
+                        // anything following the frame for LoaderBoot YMODEM.
+                        let frame_len = u16::from_le_bytes([
+                            handshake_response[ack_start + 4],
+                            handshake_response[ack_start + 5],
+                        ]) as usize;
+                        let frame_end = ack_start + frame_len;
+                        if handshake_response.len() >= frame_end {
+                            self.prefetched_ymodem_bytes
+                                .extend_from_slice(&handshake_response[frame_end..]);
+                            info!("Handshake successful!");
+
+                            // Change baud rate if not in late mode
+                            if !self.late_baud && self.target_baud != DEFAULT_BAUD {
+                                self.change_baud_rate(self.target_baud)?;
+                            } else {
+                                self.active_baud = DEFAULT_BAUD;
+                            }
+
+                            return Ok(());
                         }
-
-                        return Ok(());
+                    } else {
+                        // Keep only enough trailing bytes to match an ACK split
+                        // across consecutive serial reads.
+                        let keep = HANDSHAKE_ACK
+                            .len()
+                            .saturating_sub(1);
+                        if handshake_response.len() > keep {
+                            let discard = handshake_response.len() - keep;
+                            handshake_response.drain(..discard);
+                        }
                     }
                 },
                 Ok(_) => {},
@@ -347,6 +403,71 @@ impl<P: Port> Ws63Flasher<P> {
             "No response after {} seconds",
             HANDSHAKE_TIMEOUT.as_secs()
         )))
+    }
+
+    /// Best-effort reset of a running firmware before entering Boot ROM.
+    fn try_at_reset_before_connect(&mut self) -> Result<()> {
+        self.cancel
+            .check()?;
+
+        if self
+            .port
+            .baud_rate()
+            != DEFAULT_BAUD
+        {
+            if let Err(err) = self
+                .port
+                .set_baud_rate(DEFAULT_BAUD)
+            {
+                if is_interrupted_error(&err) {
+                    return Err(err);
+                }
+                warn!(
+                    "Could not switch to {DEFAULT_BAUD} baud for AT reset ({err}); continuing \
+                     with the normal handshake"
+                );
+                return Ok(());
+            }
+        }
+        self.active_baud = DEFAULT_BAUD;
+
+        if let Err(err) = self.write_at_reset_command() {
+            if is_interrupted_error(&err) {
+                return Err(err);
+            }
+            warn!(
+                "AT reset attempt failed ({err}); continuing with the normal bootloader handshake"
+            );
+            return Ok(());
+        }
+
+        debug!("AT+RST sent; continuing without waiting for an OK response");
+        sleep_interruptible(&self.cancel, AT_RESET_DELAY)
+    }
+
+    fn write_at_reset_command(&mut self) -> Result<()> {
+        let mut written = 0;
+        while written < AT_RESET_COMMAND.len() {
+            self.cancel
+                .check()?;
+            match self
+                .port
+                .write(&AT_RESET_COMMAND[written..])
+            {
+                Ok(0) => {
+                    return Err(Error::Io(std::io::Error::new(
+                        std::io::ErrorKind::WriteZero,
+                        "failed to write AT reset command",
+                    )));
+                },
+                Ok(count) => written += count,
+                Err(err) => return Err(Error::Io(err)),
+            }
+        }
+
+        self.port
+            .flush()
+            .map_err(Error::Io)
     }
 
     fn handshake_baud(&self) -> u32 {
@@ -999,12 +1120,19 @@ impl<P: Port> crate::target::Flasher for Ws63Flasher<P> {
 mod tests {
     use {
         super::*,
-        crate::port::Port,
+        crate::{port::Port, target::ws63::protocol::Command},
         std::{
             io::{Read, Write},
             sync::{Arc, Mutex},
         },
     };
+
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    enum MockEvent {
+        Clear,
+        Write(Vec<u8>),
+        Flush,
+    }
 
     /// Mock port implementation for testing without real hardware.
     ///
@@ -1018,6 +1146,9 @@ mod tests {
         max_read_size: usize,
         read_buffer: Arc<Mutex<Vec<u8>>>,
         write_buffer: Arc<Mutex<Vec<u8>>>,
+        events: Arc<Mutex<Vec<MockEvent>>>,
+        next_write_error: Arc<Mutex<Option<std::io::ErrorKind>>>,
+        handshake_response: Option<Vec<u8>>,
         dtr: bool,
         rts: bool,
     }
@@ -1031,9 +1162,43 @@ mod tests {
                 max_read_size: 1,
                 read_buffer: Arc::new(Mutex::new(Vec::new())),
                 write_buffer: Arc::new(Mutex::new(Vec::new())),
+                events: Arc::new(Mutex::new(Vec::new())),
+                next_write_error: Arc::new(Mutex::new(None)),
+                handshake_response: None,
                 dtr: false,
                 rts: false,
             }
+        }
+
+        fn with_handshake_response(mut self, response: Vec<u8>) -> Self {
+            self.handshake_response = Some(response);
+            self
+        }
+
+        fn with_max_read_size(mut self, max_read_size: usize) -> Self {
+            self.max_read_size = max_read_size;
+            self
+        }
+
+        fn handshake_ack_frame() -> Vec<u8> {
+            let mut frame = HANDSHAKE_ACK.to_vec();
+            let crc = crate::protocol::crc::crc16_xmodem(&frame);
+            frame.extend_from_slice(&crc.to_le_bytes());
+            frame
+        }
+
+        fn fail_next_write(&self, kind: std::io::ErrorKind) {
+            *self
+                .next_write_error
+                .lock()
+                .unwrap() = Some(kind);
+        }
+
+        fn events(&self) -> Vec<MockEvent> {
+            self.events
+                .lock()
+                .unwrap()
+                .clone()
         }
 
         /// Add data to the read buffer (simulates receiving data from device).
@@ -1089,6 +1254,10 @@ mod tests {
         }
 
         fn clear_buffers(&mut self) -> Result<()> {
+            self.events
+                .lock()
+                .unwrap()
+                .push(MockEvent::Clear);
             self.clear();
             Ok(())
         }
@@ -1145,15 +1314,41 @@ mod tests {
 
     impl Write for MockPort {
         fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-            let mut write_buf = self
-                .write_buffer
+            self.events
                 .lock()
-                .map_err(|e| std::io::Error::other(format!("mutex poisoned: {e}")))?;
-            write_buf.extend_from_slice(buf);
+                .map_err(|e| std::io::Error::other(format!("mutex poisoned: {e}")))?
+                .push(MockEvent::Write(buf.to_vec()));
+
+            if let Some(kind) = self
+                .next_write_error
+                .lock()
+                .map_err(|e| std::io::Error::other(format!("mutex poisoned: {e}")))?
+                .take()
+            {
+                return Err(std::io::Error::new(kind, "scripted write failure"));
+            }
+
+            self.write_buffer
+                .lock()
+                .map_err(|e| std::io::Error::other(format!("mutex poisoned: {e}")))?
+                .extend_from_slice(buf);
+
+            if buf.get(6) == Some(&(Command::Handshake as u8)) {
+                if let Some(response) = &self.handshake_response {
+                    self.read_buffer
+                        .lock()
+                        .map_err(|e| std::io::Error::other(format!("mutex poisoned: {e}")))?
+                        .extend_from_slice(response);
+                }
+            }
             Ok(buf.len())
         }
 
         fn flush(&mut self) -> std::io::Result<()> {
+            self.events
+                .lock()
+                .map_err(|e| std::io::Error::other(format!("mutex poisoned: {e}")))?
+                .push(MockEvent::Flush);
             Ok(())
         }
     }
@@ -1166,6 +1361,7 @@ mod tests {
 
         assert_eq!(flasher.target_baud, 921600);
         assert!(!flasher.late_baud);
+        assert!(flasher.at_reset_before_connect);
         assert_eq!(flasher.verbose, 0);
     }
 
@@ -1175,11 +1371,127 @@ mod tests {
         let port = MockPort::new("/dev/ttyUSB0");
         let flasher = Ws63Flasher::with_cancel(port, 921600, CancelContext::none())
             .with_late_baud(true)
+            .with_at_reset(false)
             .with_verbose(2);
 
         assert!(flasher.late_baud);
+        assert!(!flasher.at_reset_before_connect);
         assert_eq!(flasher.verbose, 2);
         assert_eq!(flasher.handshake_baud(), DEFAULT_BAUD);
+    }
+
+    #[test]
+    fn test_connect_sends_one_at_reset_before_fragmented_handshake() {
+        let mut response = b"AT+RST\r\nbooting...\r\n".to_vec();
+        response.extend_from_slice(&MockPort::handshake_ack_frame());
+        let port = MockPort::new("/dev/ttyUSB0").with_handshake_response(response);
+        let observer = port.clone();
+        let mut flasher = Ws63Flasher::with_cancel(port, DEFAULT_BAUD, CancelContext::none());
+
+        flasher
+            .connect()
+            .unwrap();
+
+        let handshake = CommandFrame::handshake(DEFAULT_BAUD).build();
+        let events = observer.events();
+        assert_eq!(events[0], MockEvent::Clear);
+        assert_eq!(events[1], MockEvent::Write(AT_RESET_COMMAND.to_vec()));
+        assert_eq!(events[2], MockEvent::Flush);
+        assert!(
+            events
+                .iter()
+                .skip(3)
+                .any(|event| event == &MockEvent::Write(handshake.clone()))
+        );
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| event == &&MockEvent::Write(AT_RESET_COMMAND.to_vec()))
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn test_connect_preserves_ymodem_input_after_combined_handshake_read() {
+        let mut response = b"boot noise".to_vec();
+        response.extend_from_slice(&MockPort::handshake_ack_frame());
+        response.push(b'C');
+        let port = MockPort::new("/dev/ttyUSB0")
+            .with_handshake_response(response)
+            .with_max_read_size(256);
+        let mut flasher = Ws63Flasher::with_cancel(port, DEFAULT_BAUD, CancelContext::none());
+
+        flasher
+            .connect()
+            .unwrap();
+
+        assert_eq!(flasher.prefetched_ymodem_bytes, vec![b'C']);
+    }
+
+    #[test]
+    fn test_connect_continues_when_at_reset_write_fails() {
+        let port =
+            MockPort::new("/dev/ttyUSB0").with_handshake_response(MockPort::handshake_ack_frame());
+        port.fail_next_write(std::io::ErrorKind::BrokenPipe);
+        let observer = port.clone();
+        let mut flasher = Ws63Flasher::with_cancel(port, DEFAULT_BAUD, CancelContext::none());
+
+        flasher
+            .connect()
+            .unwrap();
+
+        let handshake = CommandFrame::handshake(DEFAULT_BAUD).build();
+        let events = observer.events();
+        assert_eq!(events[1], MockEvent::Write(AT_RESET_COMMAND.to_vec()));
+        assert!(
+            events
+                .iter()
+                .any(|event| event == &MockEvent::Write(handshake.clone()))
+        );
+    }
+
+    #[test]
+    fn test_connect_propagates_interrupted_at_reset_write() {
+        let port =
+            MockPort::new("/dev/ttyUSB0").with_handshake_response(MockPort::handshake_ack_frame());
+        port.fail_next_write(std::io::ErrorKind::Interrupted);
+        let observer = port.clone();
+        let mut flasher = Ws63Flasher::with_cancel(port, DEFAULT_BAUD, CancelContext::none());
+
+        let result = flasher.connect();
+
+        assert!(matches!(
+            result,
+            Err(Error::Io(ref err)) if err.kind() == std::io::ErrorKind::Interrupted
+        ));
+        let handshake = CommandFrame::handshake(DEFAULT_BAUD).build();
+        assert!(
+            !observer
+                .events()
+                .iter()
+                .any(|event| event == &MockEvent::Write(handshake.clone()))
+        );
+    }
+
+    #[test]
+    fn test_connect_can_disable_at_reset() {
+        let port =
+            MockPort::new("/dev/ttyUSB0").with_handshake_response(MockPort::handshake_ack_frame());
+        let observer = port.clone();
+        let mut flasher = Ws63Flasher::with_cancel(port, DEFAULT_BAUD, CancelContext::none())
+            .with_at_reset(false);
+
+        flasher
+            .connect()
+            .unwrap();
+
+        assert!(
+            !observer
+                .events()
+                .iter()
+                .any(|event| event == &MockEvent::Write(AT_RESET_COMMAND.to_vec()))
+        );
     }
 
     #[test]
@@ -1350,15 +1662,31 @@ mod tests {
     fn test_create_flasher_with_port_shared_seboot_chips() {
         use crate::target::ChipFamily;
 
-        let port = MockPort::new("/dev/ttyUSB0");
-        let result = ChipFamily::Bs2x.create_flasher_with_port(port, 115200, false, 0);
+        for (family, expects_at_reset) in [
+            (ChipFamily::Ws63, true),
+            (ChipFamily::Bs2x, false),
+            (ChipFamily::Bs25, false),
+        ] {
+            let port = MockPort::new("/dev/ttyUSB0")
+                .with_handshake_response(MockPort::handshake_ack_frame());
+            let observer = port.clone();
+            let mut flasher = family
+                .create_flasher_with_port(port, DEFAULT_BAUD, false, 0)
+                .unwrap();
 
-        assert!(result.is_ok());
+            flasher
+                .connect()
+                .unwrap();
 
-        let port = MockPort::new("/dev/ttyUSB1");
-        let result = ChipFamily::Bs25.create_flasher_with_port(port, 115200, false, 0);
-
-        assert!(result.is_ok());
+            let sent_at_reset = observer
+                .events()
+                .iter()
+                .any(|event| event == &MockEvent::Write(AT_RESET_COMMAND.to_vec()));
+            assert_eq!(
+                sent_at_reset, expects_at_reset,
+                "unexpected AT reset behavior for {family}"
+            );
+        }
     }
 
     /// Test unsupported chip family still returns an error for generic ports.
