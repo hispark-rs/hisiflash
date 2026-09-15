@@ -28,13 +28,21 @@ pub const DEFAULT_BAUD: u32 = 115200;
 /// High-speed baud rate after handshake.
 pub const HIGH_BAUD: u32 = 921600;
 
-/// Handshake ACK magic (first 10 bytes of successful handshake response).
+/// Canonical first 10 bytes of a successful handshake response.
+///
+/// Some ROM revisions return `0xA5` instead of `0x00` in the final status byte;
+/// matching therefore uses only the first nine bytes and validates the full CRC.
 pub const HANDSHAKE_ACK: [u8; 10] = [
     0xEF, 0xBE, 0xAD, 0xDE, // Magic (little-endian)
     0x0C, 0x00, // Length = 12
     0xE1, 0x1E, // CMD = 0xE1, SCMD = 0x1E (swapped 0x0F)
     0x5A, 0x00, // ACK = 0x5A (success)
 ];
+
+/// Total length of a WS63 handshake ACK frame, including its CRC16.
+pub const HANDSHAKE_ACK_FRAME_LEN: usize = 12;
+
+const HANDSHAKE_ACK_FIXED_PREFIX_LEN: usize = 9;
 
 /// WS63 command types.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -255,10 +263,33 @@ impl ResponseFrame {
     }
 }
 
-/// Check if data contains the handshake ACK pattern.
+/// Find a complete, CRC-valid handshake success ACK in a noisy byte stream.
+///
+/// Byte 9 is a device status/error-code field. Captured WS63 ROMs return both
+/// `0x00` and `0xA5` there even when byte 8 reports success (`0x5A`), so it must
+/// not be part of the fixed prefix match.
+pub(super) fn find_handshake_ack(data: &[u8]) -> Option<(usize, usize)> {
+    data.windows(HANDSHAKE_ACK_FRAME_LEN)
+        .enumerate()
+        .find_map(|(start, frame)| {
+            if frame[..HANDSHAKE_ACK_FIXED_PREFIX_LEN]
+                != HANDSHAKE_ACK[..HANDSHAKE_ACK_FIXED_PREFIX_LEN]
+            {
+                return None;
+            }
+
+            let expected_crc = crc16_xmodem(&frame[..HANDSHAKE_ACK_FRAME_LEN - 2]);
+            let received_crc = u16::from_le_bytes([
+                frame[HANDSHAKE_ACK_FRAME_LEN - 2],
+                frame[HANDSHAKE_ACK_FRAME_LEN - 1],
+            ]);
+            (expected_crc == received_crc).then_some((start, start + HANDSHAKE_ACK_FRAME_LEN))
+        })
+}
+
+/// Check if data contains a complete, CRC-valid handshake success ACK.
 pub fn contains_handshake_ack(data: &[u8]) -> bool {
-    data.windows(HANDSHAKE_ACK.len())
-        .any(|w| w == HANDSHAKE_ACK)
+    find_handshake_ack(data).is_some()
 }
 
 #[cfg(test)]
@@ -309,14 +340,28 @@ mod tests {
 
     #[test]
     fn test_contains_handshake_ack() {
+        let mut ack = HANDSHAKE_ACK.to_vec();
+        let crc = crate::protocol::crc::crc16_xmodem(&ack);
+        ack.extend_from_slice(&crc.to_le_bytes());
+
         // Should find ACK in exact match
-        assert!(contains_handshake_ack(&HANDSHAKE_ACK));
+        assert!(contains_handshake_ack(&ack));
 
         // Should find ACK with garbage before/after
         let mut data = vec![0x00, 0x00];
-        data.extend_from_slice(&HANDSHAKE_ACK);
+        data.extend_from_slice(&ack);
         data.extend_from_slice(&[0x00, 0x00]);
         assert!(contains_handshake_ack(&data));
+
+        // Captured ROM response: success result 0x5A with status byte 0xA5.
+        assert!(contains_handshake_ack(&[
+            0xEF, 0xBE, 0xAD, 0xDE, 0x0C, 0x00, 0xE1, 0x1E, 0x5A, 0xA5, 0xDA, 0xC7,
+        ]));
+
+        // A matching prefix with a corrupt CRC is not a valid ACK.
+        let mut corrupt = ack;
+        corrupt[HANDSHAKE_ACK_FRAME_LEN - 1] ^= 0xFF;
+        assert!(!contains_handshake_ack(&corrupt));
 
         // Should not find ACK in random data
         assert!(!contains_handshake_ack(&[0x00; 20]));
@@ -436,5 +481,6 @@ mod tests {
         assert_eq!(DEFAULT_BAUD, 115200);
         assert_eq!(HIGH_BAUD, 921600);
         assert_eq!(HANDSHAKE_ACK.len(), 10);
+        assert_eq!(HANDSHAKE_ACK_FRAME_LEN, 12);
     }
 }

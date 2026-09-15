@@ -9,9 +9,13 @@ with pre-release tags.
 ## [Unreleased]
 
 ### Changed
-- WS63 flash, write, and erase connections now make a one-shot best-effort
-  `AT+RST` attempt before the existing SEBOOT handshake; devices without AT
-  support still use the manual-reset fallback.
+- WS63 flash, write, and erase connections now interleave best-effort `AT+RST`
+  attempts with the SEBOOT handshake, retrying while disconnected; devices
+  without AT support still use the manual-reset fallback.
+
+### Fixed
+- Accept CRC-valid WS63 Boot ROM success acknowledgements with variant status
+  bytes, and avoid delaying or blocking the handshake after an AT reset.
 
 ## [1.0.0-beta.1] - 2026-07-09
 

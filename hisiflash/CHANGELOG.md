@@ -8,11 +8,17 @@ and this crate follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 ## [Unreleased]
 
 ### Added
-- Before its first SEBOOT handshake, the WS63 flasher now makes one best-effort
-  `AT+RST` attempt at 115200 baud. Unsupported firmware and ordinary serial
-  errors fall back to the existing handshake/manual-reset flow.
+- During the SEBOOT handshake, the WS63 flasher now makes best-effort `AT+RST`
+  attempts at 115200 baud. Unsupported firmware and ordinary serial errors fall
+  back to the existing handshake/manual-reset flow.
 
 ### Fixed
+- Accept CRC-valid WS63 handshake acknowledgements whose device status byte is
+  non-zero (including the captured `0xA5` ROM response) when the result byte is
+  successful.
+- Continue Boot ROM handshakes immediately after AT reset, retry AT roughly once
+  per second while disconnected, and use a temporary 10 ms serial read timeout
+  so the reset handshake window is not lost to the normal one-second timeout.
 - Preserve partial handshake acknowledgements across serial reads and retain
   trailing LoaderBoot input, including acknowledgements interleaved with AT
   echo or boot output.
