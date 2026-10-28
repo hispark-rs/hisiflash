@@ -27,6 +27,57 @@ fn short_help_exits_zero_and_writes_stdout_only() {
 }
 
 #[test]
+fn ws53_help_exposes_qualified_inputs_and_explicit_recovery() {
+    cli_cmd()
+        .args(["ws53", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--backup-sha256"))
+        .stdout(predicate::str::contains("--usb-serial"))
+        .stdout(predicate::str::contains("recover"))
+        .stderr(predicate::str::is_empty());
+}
+
+#[test]
+fn ws53_flash_without_policy_attestation_cannot_reach_a_port() {
+    let dir = tempdir().unwrap();
+    cli_cmd()
+        .env_remove("HISIFLASH_CHIP")
+        .env_remove("HISIFLASH_BAUD")
+        .args([
+            "ws53",
+            "flash",
+            "--loaderboot",
+            "missing",
+            "--loader-sha256",
+            "invalid",
+            "--backup",
+            "missing",
+            "--backup-sha256",
+            "invalid",
+            "--application",
+            "missing",
+            "--application-sha256",
+            "invalid",
+            "--output",
+        ])
+        .arg(
+            dir.path()
+                .join("untouched"),
+        )
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "secure-boot-disabled qualification",
+        ));
+    assert!(
+        !dir.path()
+            .join("untouched")
+            .exists()
+    );
+}
+
+#[test]
 fn version_exits_zero_and_writes_stdout_only() {
     let mut cmd = cli_cmd();
     cmd.arg("--version")

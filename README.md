@@ -46,8 +46,12 @@
 | WS63 | ✅ 完整支持 | WiFi + BLE +SLE 芯片 |
 | BS2X | ⚠️ 实验性串口支持 | BS21 等 BLE + SLE 芯片（共享 SEBOOT/YMODEM 串口流程） |
 | BS25 | ⚠️ 实验性串口支持 | BLE + SLE 增强版（共享 SEBOOT/YMODEM 串口流程） |
+| WS53 | ⚠️ 实验开发中 | 独立 `ws53 check/flash/recover`，限定 MCU-mode-1 4MiB布局；CLI实板与冷启动尚未验收 |
 
 WS63、BS2X 和 BS25 当前共享同一套 SEBOOT/YMODEM 串口烧录实现。BS2X/BS25 仍标记为实验性支持，后续会继续补齐专用差异和更完整的验证矩阵。
+
+WS53 的镜像、备份、设备选择和恢复要求见[协议与中文操作说明](docs/protocols/WS53.md)。
+它使用独立命令入口，不能套用下文 WS63 的裸地址、全片擦除或默认参数。
 
 ## 安装
 

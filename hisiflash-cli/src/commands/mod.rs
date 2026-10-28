@@ -7,3 +7,4 @@ pub(crate) mod firmware;
 pub(crate) mod flash;
 pub(crate) mod info;
 pub(crate) mod monitor;
+pub(crate) mod ws53;

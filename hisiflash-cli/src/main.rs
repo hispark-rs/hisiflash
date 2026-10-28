@@ -351,6 +351,8 @@ impl CliError {
 /// Available commands.
 #[derive(Subcommand)]
 enum Commands {
+    /// Experimental WS53 MCU-mode-1 application check, flash and explicit recovery.
+    Ws53(commands::ws53::Options),
     /// Flash a FWPKG firmware package.
     Flash {
         /// Path to the FWPKG firmware file (auto-detected if omitted).
@@ -597,6 +599,16 @@ fn run_with_args(raw_args: &[String]) -> Result<()> {
         Ok(m) => m,
         Err(err) => {
             match err.kind() {
+                // WS53's experimental profile has its own arguments; preserve
+                // clap's subcommand help instead of replacing it with root help.
+                ErrorKind::DisplayHelp
+                    if raw_args
+                        .iter()
+                        .any(|arg| arg == "ws53") =>
+                {
+                    err.print()?;
+                    return Ok(());
+                },
                 // Handle version explicitly for i18n
                 ErrorKind::DisplayVersion => {
                     println!("hisiflash {}", env!("CARGO_PKG_VERSION"));
@@ -663,6 +675,19 @@ fn run_with_args(raw_args: &[String]) -> Result<()> {
         cli.verbose
     );
 
+    // WS53 uses explicit profile/port/baud and independent preservation rules;
+    // never inherit a WS63 chip, skip-verify or automatic firmware selection.
+    if let Commands::Ws53(options) = &cli.command {
+        return commands::ws53::run(
+            options,
+            cli.port
+                .as_deref(),
+            cli.baud,
+            cli.chip
+                .is_some(),
+        );
+    }
+
     // Load configuration
     let mut config = if let Some(ref path) = cli.config_path {
         Config::load_from_path(path)
@@ -673,6 +698,7 @@ fn run_with_args(raw_args: &[String]) -> Result<()> {
     apply_config_defaults(&mut cli, &matches, &config)?;
 
     match &cli.command {
+        Commands::Ws53(_) => unreachable!("WS53 dispatched before generic config"),
         Commands::Flash {
             firmware,
             filter,
