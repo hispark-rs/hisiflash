@@ -1,2 +1,4 @@
 /target
+# Chip source modules are not Cargo output directories (also override global ignores).
+!/hisiflash/src/target/
 .DS_Store

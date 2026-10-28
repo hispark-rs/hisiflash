@@ -92,7 +92,9 @@ byteorder = "1.5"
 
 # Internal crates
 hisiflash = { version = "0.4.0", path = "hisiflash" }
-hisi-fwpkg = "0.3.0"
+# WS53 image APIs, pinned to the published review branch until crate release.
+hisi-fwpkg = { git = "https://github.com/hispark-rs/hisi-fwpkg", rev = "217447f82bcafa1bec0cad2f0170dc5056ea3c9b" }
+sha2 = "0.10.9"
 
 # Testing
 tempfile = "3"
