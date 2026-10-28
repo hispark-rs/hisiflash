@@ -128,6 +128,14 @@ impl<P: Port> Receiver<'_, P> {
         let mut expected = 1u8;
         let mut previous: Option<(u8, Vec<u8>)> = None;
         while let Some((seq, payload)) = self.packet(false)? {
+            // The sender may not have received the header ACK or the initial
+            // C. Accept only the identical header before any data: sequence
+            // zero later is a legitimate data block after sequence wrap.
+            if data.is_empty() && seq == 0 && payload == header {
+                self.port
+                    .write_all_bytes(&[6, b'C'])?;
+                continue;
+            }
             if previous
                 .as_ref()
                 .is_some_and(|p| p.0 == seq && p.1 == payload)

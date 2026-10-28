@@ -634,6 +634,45 @@ mod tests {
         }
     }
 
+    #[test]
+    fn flash_upload_reacks_only_an_identical_initial_header() {
+        let mut header = [0u8; 128];
+        header[..13].copy_from_slice(b"upload.bin\x001\x00");
+        let make_wire = |second_header: &[u8; 128], after_data: bool| {
+            let mut wire = response(0x5a, 0xa5).to_vec();
+            wire.extend(upload_packet(0, &header));
+            if after_data {
+                wire.extend(upload_packet(1, &[0x42; 128]));
+            }
+            wire.extend(upload_packet(0, second_header));
+            if !after_data {
+                wire.extend(upload_packet(1, &[0x42; 128]));
+            }
+            wire.push(4);
+            wire.extend(upload_packet(0, &[0; 128]));
+            wire.extend(response(0x5a, 0));
+            wire
+        };
+        let ready = || RomHandshake {
+            ack: response(0x5a, 0),
+            trailing: vec![],
+        };
+        let mut port = MockPort::new(vec![make_wire(&header, false)], ErrorKind::BrokenPipe);
+        assert_eq!(
+            read_flash(&mut port, 0, 1, ready(), &CancelContext::none()).unwrap(),
+            [0x42]
+        );
+        assert_eq!(&port.writes[18..], &[b'C', 6, b'C', 6, b'C', 6, b'C', 6]);
+
+        let mut changed = header;
+        changed[0] ^= 1;
+        for wire in [make_wire(&changed, false), make_wire(&header, true)] {
+            let mut port = MockPort::new(vec![wire], ErrorKind::BrokenPipe);
+            assert!(read_flash(&mut port, 0, 1, ready(), &CancelContext::none()).is_err());
+            assert_eq!(port.timeout, Duration::from_secs(3));
+        }
+    }
+
     fn update_ready() -> RomHandshake {
         RomHandshake {
             ack: response(0x5a, 0),
