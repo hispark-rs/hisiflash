@@ -231,6 +231,54 @@ fn preserved_regions_and_same_session_nv_are_checked_in_apply_and_recovery() {
 }
 
 #[test]
+fn recovery_checks_large_unordered_plan_and_rejects_bad_extents() {
+    let dir = tempfile::tempdir().unwrap();
+    let options = fixture(dir.path());
+    let original = std::fs::read(options.backup).unwrap();
+    let application = std::fs::read(options.application).unwrap();
+    let mut plan = plan_unsigned_application(&original, &application).unwrap();
+    // Synthetic extents exercise a large plan and deliberately remain after the
+    // header in transaction order. This does not qualify a larger Flash image.
+    for index in 0..500 {
+        let start = 0x60000 + index * 0x1000;
+        plan.sectors
+            .push(hisi_fwpkg::ws53::ApplicationSector {
+                offset: u32::try_from(start).unwrap(),
+                original: original[start..start + 0x1000].to_vec(),
+                replacement: vec![0x33; 0x1000],
+            });
+    }
+    let mut before = original.clone();
+    for sector in &plan.sectors {
+        let start = sector.offset as usize;
+        before[start
+            ..start
+                + sector
+                    .original
+                    .len()]
+            .fill(0x55);
+    }
+    before[NV_START..].fill(0x12);
+    let restored = expected_image(&original, &before, &plan, true).unwrap();
+    assert_eq!(&restored[..NV_START], &original[..NV_START]);
+    assert_eq!(&restored[NV_START..], &before[NV_START..]);
+    assert!(expected_image(&original, &before, &plan, false).is_err());
+    before[0x5cfff] ^= 1; // immediately before the application region
+    assert!(expected_image(&original, &before, &plan, true).is_err());
+    before[0x5cfff] ^= 1;
+    plan.sectors
+        .last_mut()
+        .unwrap()
+        .offset = plan.sectors[0].offset;
+    assert!(expected_image(&original, &before, &plan, true).is_err());
+    plan.sectors
+        .last_mut()
+        .unwrap()
+        .offset = u32::try_from(NV_START).unwrap();
+    assert!(expected_image(&original, &before, &plan, true).is_err());
+}
+
+#[test]
 fn ws53_cli_has_bounded_monitor_and_explicit_boot_gate() {
     let common = [
         "hisiflash",

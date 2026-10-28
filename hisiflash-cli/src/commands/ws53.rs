@@ -173,24 +173,60 @@ fn expected_image(
         original.len() == FLASH_LEN && before.len() == FLASH_LEN,
         "incomplete full backup"
     );
-    for index in 0..NV_START {
-        let affected = recovery
-            && plan
-                .sectors
-                .iter()
-                .any(|s| {
-                    let start = s.offset as usize;
-                    (start
-                        ..start
-                            + s.original
-                                .len())
-                        .contains(&index)
-                });
+    // The plan writes the header last and is therefore not address ordered.
+    // Sort a copy of its extents for linear verification; do not change the
+    // actual transaction order. Only recovery may ignore a planned extent.
+    let mut ranges = Vec::with_capacity(
+        plan.sectors
+            .len(),
+    );
+    for sector in &plan.sectors {
+        let start = sector.offset as usize;
+        let end = start
+            .checked_add(
+                sector
+                    .original
+                    .len(),
+            )
+            .context("WS53 sector range overflow")?;
         ensure!(
-            original[index] == before[index] || affected,
-            "live backup mismatch at {index:#x}; no erase sent"
+            start < end
+                && end <= NV_START
+                && sector
+                    .original
+                    .len()
+                    == sector
+                        .replacement
+                        .len(),
+            "WS53 planned sector outside protected image"
         );
+        ranges.push((start, end));
     }
+    ranges.sort_unstable();
+    let mut cursor = 0;
+    for &(start, end) in &ranges {
+        ensure!(start >= cursor, "overlapping WS53 planned sectors");
+        cursor = end;
+    }
+    let compare = |start: usize, end: usize| -> Result<()> {
+        if let Some(relative) = original[start..end]
+            .iter()
+            .zip(&before[start..end])
+            .position(|(a, b)| a != b)
+        {
+            let index = start + relative;
+            bail!("live backup mismatch at {index:#x}; no erase sent");
+        }
+        Ok(())
+    };
+    cursor = 0;
+    if recovery {
+        for &(start, end) in &ranges {
+            compare(cursor, start)?;
+            cursor = end;
+        }
+    }
+    compare(cursor, NV_START)?;
     let mut expected = before.to_vec();
     for sector in &plan.sectors {
         let bytes = if recovery {
